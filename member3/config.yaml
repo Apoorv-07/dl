@@ -1,0 +1,122 @@
+# Member 3 - the one and only configuration file.
+# Every value that changes a number in the paper is here, and every value below is
+# copied into results/manifest.json at run time.
+
+experiment:
+  name: member3_full_run
+  id: cfg-m3-v1
+  description: >
+    Adaptive Memory Bank + incremental FAISS retrieval + confidence-aware threshold +
+    multi-stage alert verification + explainable graph attribution, evaluated
+    cross-dataset and leave-one-attack-family-out.
+
+seed: 42                     # single global seed: memory selection, bootstrap CIs, masking draws
+
+# ---------------------------------------------------------------- upstream (Member 2)
+member2:
+  artifacts_dir: member2_artifacts      # see docs/MEMBER2_HANDOFF_CONTRACT.md §Packaging
+  checkpoint: checkpoint.pt
+  model_config: model_config.yaml
+  adapter_path: null                    # null -> <artifacts_dir>/model_adapter.py
+  embedding_dim: 128                    # must equal adapter.metadata()['embedding_dim']
+  n_features: 53                        # NetFlow v3 features (schema owned by Member 1/2)
+  n_snapshots: 5                        # causality-aware 30 s snapshots per sequence
+
+# ---------------------------------------------------------------- data
+data:
+  records_path: null                    # npz/csv of Member-2 embeddings + eval metadata
+  graph_path: null                      # temporal graph sequences (needed for masking Fidelity+)
+  require_labels: true                  # labels are read for evaluation only, never for fitting
+  window_seconds: 30                    # snapshot duration W_m from the design doc
+  dataset_label: null                   # optional label written into every table row;
+                                        # defaults to evaluation.test_datasets
+
+# ---------------------------------------------------------------- adaptive memory bank
+memory:
+  capacity: 1024               # representative normal embeddings kept (not all embeddings)
+  index_type: hnsw             # hnsw | flat (brute-force baseline) | numpy
+  hnsw_M: 32
+  ef_construction: 200
+  ef_search: 128
+  selection: kcenter_greedy    # deterministic coverage-first representative selection
+  replacement: redundant       # online eviction of the most redundant stored vector
+  persist: true
+  path: state/memory_index.bin
+
+retrieval:
+  k: 8
+  neighbor_aggregation: max    # similarity = max cosine over the k retrieved normals (primary definition)
+
+# ---------------------------------------------------------------- thresholding
+threshold:
+  strategy: confidence_aware   # fixed_mean3sd | fixed_percentile | confidence_aware
+  percentile: 99.5             # benign-calibration percentile target
+  k_mad: 3.5                   # robust upper fence: median + k_mad * 1.4826 * MAD
+  safety_margin: 0.25          # extra margin in units of the robust spread (environment-aware term)
+  fixed_sigma: 3.0             # used by the fixed_mean3sd baseline
+  confidence_sharpness: 1.0    # beta of the logistic confidence mapping
+  min_calibration_samples: 32  # fails the run if the calibration split is smaller
+  allow_online_recalibration: false   # threshold is frozen during evaluation (no test contamination)
+
+# ---------------------------------------------------------------- alert verification
+alerting:
+  debounce_steps: 3            # t1,t2 -> candidate ; t3 -> CONFIRMED ALERT ; benign resets streak
+
+# ---------------------------------------------------------------- online drift adaptation
+adaptation:
+  enabled: true
+  update_policy: confident_benign    # only below-threshold, confidently-benign samples
+  benign_confidence_max: 0.05
+  log: true                          # every update/rejection is appended to the memory update log
+
+# ---------------------------------------------------------------- evaluation protocol
+evaluation:
+  cross_dataset: true
+  train_dataset: NF-CSE-CIC-IDS2018-v3      # benign only
+  test_datasets: [NF-UNSW-NB15-v3]          # benign + unseen attacks
+  optional_datasets: [NF-ToN-IoT-v3]        # additional generalisation benchmark
+zero_day:
+  protocol: leave_one_attack_family_out
+  rebuild_permitted_stages: true   # rebuild memory+threshold per fold (auto-off above 20k memory rows)
+
+ablations:
+  threshold_strategies: [fixed_mean3sd, fixed_percentile, confidence_aware]
+  debounce_steps: [1, 2, 3, 4]
+  memory_modes: [static, adaptive]
+  retrieval_timing: true           # HNSW vs exact flat vs numpy brute force, same vectors
+  retrieval_queries: 200
+
+# ---------------------------------------------------------------- XAI
+xai:
+  attribution_source: gatv2_attention      # structural attention supplied by Member 2
+  mask_target: nodes                       # nodes | edges
+  mask_top_k: 3
+  top_nodes: 5
+  top_edges: 5
+  top_features: 8
+  max_alerts: 40                           # alerts evaluated with masking-and-recompute
+  methods: [attention, random, lowest_attention]
+
+statistics:
+  bootstrap_iterations: 300   # raise to >=1000 for the final submission
+  alpha: 0.05
+  repeats: 1                  # >1 adds mean +/- sd across full repeats
+
+benchmark:
+  n_samples: 150
+  repeats: 3
+  warmup: 10
+  batch_size: 1
+  latency_target_ms: 5.0      # DESIGN TARGET from the doc; only a target, never a result
+  hardware_note: sandbox x86-64, CPU only
+
+output:
+  results_dir: results
+  figures_dir: figures
+  state_dir: state
+
+api:
+  host: 0.0.0.0
+  port: 8040
+  dashboard_title: Member 3 - Analyst View
+  allow_online_memory_updates: false   # keep false: serving traffic must not silently move the reference set
