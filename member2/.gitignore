@@ -1,0 +1,27 @@
+﻿# environments and caches
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# data and model files (share via Git LFS, a release asset, or a shared drive)
+*.pt
+*.pth
+*.npz
+checkpoints_validation/
+checkpoints_exp/
+diagnostics/
+
+# console outputs
+*_console.txt
+eval_*.txt
+train_e*.txt
+
+# archived scratch scripts
+training/_archive/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
