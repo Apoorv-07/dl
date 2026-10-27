@@ -1,0 +1,61 @@
+{
+  "dataset1": {
+    "top_level": {},
+    "sequence_keys": [
+      "feature_list",
+      "label",
+      "node_id_maps",
+      "num_snapshots",
+      "sequence_id",
+      "snapshots",
+      "window_size_sec"
+    ],
+    "snapshot_keys": [
+      "edge_attr",
+      "edge_index",
+      "x"
+    ]
+  },
+  "dataset2": {
+    "top_level": {
+      "feature_list": "<list>",
+      "num_features": 53,
+      "window_size_sec": 30,
+      "num_snapshots": 5,
+      "sequence_duration_sec": 150,
+      "dataset": "NF-CSE-CIC-IDS2018-v3",
+      "purpose": "in-domain validation",
+      "contains_benign": true,
+      "contains_attacks": true,
+      "normalization": "benign StandardScaler (feature_scaler.pkl) -> log1p(clip>=0)/min-max (norm_stats.pkl); nothing refitted",
+      "label_definition": "sequence label = 1 if it contains >=1 attack flow; see attack_ratio for how many",
+      "low_traffic_rule": "mean nodes per snapshot < 30 (flagged, not dropped)"
+    },
+    "sequence_keys": [
+      "attack_ratio",
+      "attack_types",
+      "end_time",
+      "feature_list",
+      "label",
+      "low_traffic",
+      "mean_nodes",
+      "node_id_maps",
+      "num_attack_flows",
+      "num_flows",
+      "num_nodes_per_snapshot",
+      "num_snapshots",
+      "sequence_id",
+      "snapshots",
+      "start_time",
+      "window_ids",
+      "window_size_sec"
+    ],
+    "snapshot_keys": [
+      "edge_attr",
+      "edge_index",
+      "edge_y",
+      "x",
+      "y"
+    ]
+  }
+}
