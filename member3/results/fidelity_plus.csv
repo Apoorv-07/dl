@@ -1,0 +1,4 @@
+sample_id,alert_id,masking_method,mask_target,n_components_masked,anomaly_score_before,anomaly_score_after,score_reduction,fidelity_plus_pct,attention_coverage,dataset_id,attack_family
+229,229#attention,attention,nodes,3,0.26064014434814453,0.17052268981933594,0.0901174545288086,34.575431483968224,0.42857143062371095,dataset2_graph_validation_v2,benign
+229,229#random,random,nodes,3,0.26064014434814453,0.14625895023345947,0.11438119411468506,43.88471868013655,0.4285714279627893,dataset2_graph_validation_v2,benign
+229,229#lowest_attention,lowest_attention,nodes,3,0.26064014434814453,0.2542837858200073,0.006356358528137207,2.438748851998346,0.428571425834052,dataset2_graph_validation_v2,benign

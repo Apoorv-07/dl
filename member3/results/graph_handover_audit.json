@@ -1,0 +1,99 @@
+{
+  "status": "AUDIT ONLY \u2014 not final evaluation",
+  "records_path": "C:\\Users\\irons\\Downloads\\dl-final\\dl\\member3\\member2_artifacts\\member2_records.npz",
+  "record_rows": 4930,
+  "record_counts_by_dataset_split_label": {
+    "dataset1_graph_pt|benign_heldout_dataset1|benign": 247,
+    "dataset1_graph_pt|train_benign|benign": 2220,
+    "dataset2_graph_validation_v2|calibration_benign|benign": 724,
+    "dataset2_graph_validation_v2|test|attack": 1015,
+    "dataset2_graph_validation_v2|test|benign": 724
+  },
+  "graph_files": [
+    {
+      "path": "C:\\Users\\irons\\Downloads\\dl-final\\dl\\member2\\graph.pt",
+      "dataset_id_assumed_from_filename": "dataset1_graph_pt",
+      "file_bytes": 4970255821,
+      "sequence_count": 2463,
+      "snapshot_count": 12315,
+      "snapshots_per_sequence_distribution": {
+        "5": 2463
+      },
+      "expected_snapshots_per_sequence": 5,
+      "node_feature_dimensions": {
+        "53": 12315
+      },
+      "edge_feature_dimensions": {
+        "53": 12315
+      },
+      "expected_feature_dimension": 53,
+      "snapshots_with_explicit_time_metadata": 0,
+      "sequence_ids_missing": 0,
+      "duplicate_sequence_ids_count": 0,
+      "duplicate_sequence_ids_sample": [],
+      "sequence_labels_if_present": {
+        "normal": 2463
+      },
+      "snapshots_with_empty_edge_index": 0,
+      "shape_errors_count": 0,
+      "shape_errors_sample": [],
+      "records_for_dataset_count": 2467,
+      "records_unique_sample_ids_count": 2467,
+      "record_ids_not_found_in_graph_count": 4,
+      "record_ids_not_found_in_graph_sample": [
+        "2463",
+        "2464",
+        "2465",
+        "2466"
+      ],
+      "graph_ids_not_found_in_records_count": 0,
+      "graph_ids_not_found_in_records_sample": [],
+      "duplicate_record_sample_ids_count": 0,
+      "duplicate_record_sample_ids_sample": []
+    },
+    {
+      "path": "C:\\Users\\irons\\Downloads\\dl-final\\dl\\member2\\graph_validation_v2.pt",
+      "dataset_id_assumed_from_filename": "dataset2_graph_validation_v2",
+      "file_bytes": 5764430171,
+      "sequence_count": 2463,
+      "snapshot_count": 12315,
+      "snapshots_per_sequence_distribution": {
+        "5": 2463
+      },
+      "expected_snapshots_per_sequence": 5,
+      "node_feature_dimensions": {
+        "53": 12315
+      },
+      "edge_feature_dimensions": {
+        "53": 12315
+      },
+      "expected_feature_dimension": 53,
+      "snapshots_with_explicit_time_metadata": 0,
+      "sequence_ids_missing": 0,
+      "duplicate_sequence_ids_count": 0,
+      "duplicate_sequence_ids_sample": [],
+      "sequence_labels_if_present": {
+        "0": 1448,
+        "1": 1015
+      },
+      "snapshots_with_empty_edge_index": 0,
+      "shape_errors_count": 0,
+      "shape_errors_sample": [],
+      "records_for_dataset_count": 2463,
+      "records_unique_sample_ids_count": 2463,
+      "record_ids_not_found_in_graph_count": 0,
+      "record_ids_not_found_in_graph_sample": [],
+      "graph_ids_not_found_in_records_count": 0,
+      "graph_ids_not_found_in_records_sample": [],
+      "duplicate_record_sample_ids_count": 0,
+      "duplicate_record_sample_ids_sample": []
+    }
+  ],
+  "checks_to_resolve_before_final_metrics": [
+    "Confirm every graph sequence_id maps to the intended Member-2 sample_id.",
+    "Resolve all record/graph ID/count mismatches; do not map by list index unless Member 1 confirms that contract.",
+    "Verify timestamp restoration happened before 30-second window construction.",
+    "Verify duplicate snapshots against source-flow IDs and split boundaries before declaring leakage.",
+    "Keep labels out of prediction, calibration fitting, memory updates, and XAI candidate selection."
+  ]
+}

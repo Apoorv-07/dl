@@ -1,0 +1,16 @@
+{
+  "fig01_architecture.png": "generated",
+  "fig02_roc_curve.png": "generated",
+  "fig03_pr_curve.png": "generated",
+  "fig04_score_distribution.png": "generated",
+  "fig05_confusion_matrix.png": "generated",
+  "fig06_latency_distribution.png": "generated",
+  "fig10_fidelity_plus.png": "generated",
+  "fig08_threshold_ablation.png": "generated",
+  "fig08b_threshold_ablation_fpr.png": "generated",
+  "fig09_debounce_ablation.png": "generated",
+  "fig07_memory_bank_ablation.png": "generated",
+  "fig11_cross_dataset_comparison.png": "NOT RUN: needs >= 2 test datasets (found 1) - add NF-ToN-IoT-v3 records to run this",
+  "fig12_attack_family_performance.png": "generated",
+  "_manifest": "written"
+}

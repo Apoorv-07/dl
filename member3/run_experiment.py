@@ -28,7 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from member3 import evaluate as ev  # noqa: E402
 from member3.contract import (  # noqa: E402
     SPLIT_CALIBRATION, SPLIT_MEMORY, SPLIT_TEST, ContractError, assert_splits_clean, git_commit,
-    load_adapter, load_graphs, load_records, set_seed, sha256_file, software_versions, validate_records,
+    assign_stream_metadata, attack_family_tokens, has_attack_family, load_adapter, load_graphs,
+    load_records, set_seed, sha256_file, software_versions, validate_records,
 )
 from member3.explain import build_explanation, fidelity_plus  # noqa: E402
 from member3.inference import Member3Scorer, benchmark_latency, hardware_info  # noqa: E402
@@ -86,20 +87,25 @@ class Runner:
             df = load_records(str(rp))
             validate_records(df, expected_dim=int(self.cfg.get("member2", {}).get("embedding_dim", 0) or 0),
                              need_labels=bool(d.get("require_labels", True)))
-            derived_streams = "stream_id" not in df.columns
+            required_stream_cols = ("stream_id", "stream_pos", "episode_id")
+            derived_streams = not all(
+                col in df.columns and df[col].notna().all() and not (df[col].astype(str).str.strip() == "").any()
+                for col in required_stream_cols
+            )
             if derived_streams:
-                from member3.contract import assign_streams
-                df = assign_streams(df, window_seconds=float(d.get("window_seconds", 30)),
-                                    seed=int(self.cfg.get("seed", 0)))
+                # Preserve native timestamps/source order. Do not manufacture attack bursts.
+                df = assign_stream_metadata(df, window_seconds=float(d.get("window_seconds", 30)))
             ev_cfg = dict(self.cfg.get("evaluation", {}))
             permitted = [str(ev_cfg["train_dataset"])] if ev_cfg.get("train_dataset") else None
             assert_splits_clean(df, permitted_reference_datasets=permitted)
             self.results["_provenance"] = {
                 "record_file": str(rp),
                 "record_file_sha256": sha256_file(str(rp))[:16],
-                "graph_file": str(d.get("graph_path") or "not provided (Fidelity+ will be NOT RUN)"),
-                "stream_order_source": "member1/2 columns" if not derived_streams
-                                       else "derived by member3.contract.assign_streams (upstream supplied none)",
+                "graph_file": str(d.get("graph_paths") or d.get("graph_path") or "not provided (Fidelity+ will be NOT RUN)"),
+                "stream_order_source": "Member-1/2 columns" if not derived_streams
+                                       else "preserved native timestamp/source_index/source-row order; no synthetic attack bursts",
+                "native_timestamp_coverage": float(df["timestamp"].notna().mean()) if "timestamp" in df.columns else 0.0,
+                "timestamp_note": "missing timestamps remain missing; operational seconds assume configured window_seconds",
                 "permitted_reference_datasets": permitted or "not declared in config (dataset audit skipped)",
                 "rows": {k: int(v) for k, v in df["split"].value_counts().items()}}
             self._records = df
@@ -107,11 +113,12 @@ class Runner:
 
     def graphs(self) -> Dict[str, Dict[str, Any]]:
         if self._graphs is None:
-            gp = dict(self.cfg.get("data", {})).get("graph_path")
-            if gp and os.path.exists(str(gp)):
-                self._graphs = load_graphs(str(gp))
-            else:
-                self._graphs = {}
+            data_cfg = dict(self.cfg.get("data", {}))
+            gps = data_cfg.get("graph_paths") or data_cfg.get("graph_path")
+            if isinstance(gps, str):
+                gps = [gps]
+            existing = [str(path) for path in (gps or []) if path and os.path.exists(str(path))]
+            self._graphs = load_graphs(existing) if existing else {}
         return self._graphs
 
     def adapter(self) -> Tuple[Any, Dict[str, Any]]:
@@ -204,7 +211,7 @@ def write_manifest(run: Runner, stage: str) -> None:
         "k": mem.get("k"), "debounce_length": run.cfg.get("alerting", {}).get("debounce_steps"),
         "adaptation_enabled": bool(run.cfg.get("adaptation", {}).get("enabled", True)),
         "n_update_events": mem.get("n_update_events"),
-        "scoring_definition": "anomaly_score = 1 - max_j cos(z, m_j) over top-k normal memory entries (L2-normalised z)",
+        "scoring_definition": "anomaly_score = 1 - max_j cos(h, m_j) over top-k normal memory entries (L2-normalised 128-D Member-2 h)",
         "neighbor_aggregation": run.cfg.get("retrieval", {}).get("neighbor_aggregation", "max"),
         "masking_target": run.cfg.get("xai", {}).get("mask_target"),
         "fidelity_plus_methods": list(fid.keys()) if fid else "NOT RUN",
@@ -216,6 +223,8 @@ def write_manifest(run: Runner, stage: str) -> None:
                             "config_path": run.cfg_path,
                             "config_sha256": sha256_file(run.cfg_path) if os.path.exists(run.cfg_path) else None},
         "provenance": run.results.get("provenance", run.results.get("_provenance", {})),
+        "methodology_warnings": list(run.cfg.get("methodology_warnings", [])),
+        "cross_dataset_claim_supported_by_config": bool(run.cfg.get("evaluation", {}).get("cross_dataset", False)),
     }
     manifest["results"] = _prune(run.results)
     ev.write_manifest(run.path("results", "manifest.json"), manifest)
@@ -282,14 +291,16 @@ def stage_evaluation(run: Runner) -> None:
         per_dataset.append(m)
     fam = ev.per_attack_family(pred, run.cfg)
     graphs = run.graphs()
-    seq_list = [graphs.get(str(sid)) for sid in test["sample_id"]] if graphs else None
+    seq_list = [graphs.get(f"{ds}::{sid}", graphs.get(str(sid)))
+                for ds, sid in zip(test["dataset_id"], test["sample_id"])] if graphs else None
     if seq_list is not None and all(v is None for v in seq_list):
         seq_list = None          # no per-window graphs on disk: skip the encode-stage benchmark
     bench = benchmark_latency(scorer, np.vstack(list(test["embedding"])), graphs=seq_list,
                               n_samples=int(run.cfg.get("benchmark", {}).get("n_samples", 200)),
                               n_repeat=int(run.cfg.get("benchmark", {}).get("repeats", 3)))
     # ---- leakage-audited leave-one-family-out --------------------------- #
-    families = sorted(f for f in test.loc[test["label"] == "attack", "attack_family"].unique())
+    families = sorted({family for value in test.loc[test["label"] == "attack", "attack_family"]
+                       for family in attack_family_tokens(value)})
     lfo, audit = run_leave_one_family_out(run, scorer, families)
 
     run.results["evaluation"] = {"overall_sample_level": overall, "overall_alert_level": overall_alert,
@@ -323,16 +334,17 @@ def run_leave_one_family_out(run: Runner, scorer: Member3Scorer, families: List[
         else:
             sc, changed = scorer, 0
         rec = run.records()
-        allowed_reference = rec[rec["attack_family"] != fam]        # family gone from memory+calibration inputs
+        allowed_reference = rec[~rec["attack_family"].map(lambda v: has_attack_family(v, fam))]
+        # The family is removed by token, including windows that contain multiple attack families.
         if rebuild and allowed_reference is not rec:
             sc = Member3Scorer.build(_with_excluded_family(run.cfg, fam), sc.adapter, sc.adapter_meta, allowed_reference)
         tau = float(sc.threshold.value)
         test_rows = rec[rec["split"] == SPLIT_TEST]
         p = sc.verify_alerts(sc.predict(test_rows), window_seconds=ws)
         ben = p[p["label"] == "benign"]
-        pos = p[p["attack_family"] == fam]
+        pos = p[p["attack_family"].map(lambda v: has_attack_family(v, fam))]
         sub = pd.concat([pos, ben]).sort_index()
-        y = (sub["attack_family"] == fam).astype(int).to_numpy()
+        y = sub["attack_family"].map(lambda v: has_attack_family(v, fam)).astype(int).to_numpy()
         m = ev.classification_metrics(y, sub["is_anomaly"].astype(int).to_numpy(),
                                       sub["anomaly_score"].to_numpy(dtype=float))
         m.update(ev.score_summary(sub, (sub["attack_family"] == fam).to_numpy()))
@@ -387,8 +399,13 @@ def _evaluation_tables_and_figures(run: Runner, pred: pd.DataFrame, overall: Dic
     t1 = pd.DataFrame(per_dataset) if per_dataset else pd.DataFrame()
     t0 = pd.DataFrame([{**overall, "dataset": "POOLED_TEST", "split": SPLIT_TEST},
                        {**overall_alert, "dataset": "POOLED_TEST", "split": SPLIT_TEST}])
+    cross_dataset = bool(run.cfg.get("evaluation", {}).get("cross_dataset", False))
+    table1_name = "TABLE1_overall_cross_dataset" if cross_dataset else "TABLE1_overall_heldout"
+    table1_title = ("Overall cross-dataset performance (benign-only reference, unseen test datasets)"
+                    if cross_dataset else
+                    "Overall held-out performance (current package does not establish cross-dataset generalisation)")
     bundles = [
-        ("TABLE1_overall_cross_dataset", "Overall cross-dataset performance (benign-only reference, unseen test datasets)", t1, ctx),
+        (table1_name, table1_title, t1, ctx),
         ("TABLE2_per_attack_family", "Per-attack-family performance on the test dataset", fam, ctx),
         ("TABLE3_leave_one_family_out", "Leave-one-attack-family-out zero-day results", lfo, ctx),
         ("TABLE4_operational_latency", "Operational latency results (per sample, ms)",
@@ -407,26 +424,45 @@ def _evaluation_tables_and_figures(run: Runner, pred: pd.DataFrame, overall: Dic
 
 
 
+def select_xai_candidates(scored: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+    """Select explanations from model outputs only; never filter candidates by ground truth.
+
+    Ground-truth labels are for evaluation, not live alert selection. False-positive alerts
+    also need explanations, so XAI can help diagnose why the detector fired.
+    """
+    confirmed = scored["confirmed_alert"].fillna(False).astype(bool)
+    alerts = scored.loc[confirmed].copy()
+    if len(alerts):
+        return alerts, "confirmed predicted alerts; ground-truth labels were not used to select candidates"
+    anomalies = scored["is_anomaly"].fillna(False).astype(bool)
+    return scored.loc[anomalies].copy(), "no confirmed alerts; using all single-window predicted anomalies"
+
+
 def stage_xai(run: Runner) -> None:
     scorer = run.load_scorer()
-    test = scorer.verify_alerts(scorer.predict(run.records()),
-                               window_seconds=float(run.cfg.get("data", {}).get("window_seconds", 30)))
-    alerts = test[test["confirmed_alert"] & (test["label"] == "attack")]
-    if len(alerts) == 0:
-        alerts = test[test["is_anomaly"] & (test["label"] == "attack")]
-        note = "no confirmed alerts; using single-window anomalies for XAI coverage"
-    else:
-        note = "confirmed alerts only"
+    scored = scorer.verify_alerts(scorer.predict(run.records()),
+                                 window_seconds=float(run.cfg.get("data", {}).get("window_seconds", 30)))
+    # Restrict the report to held-out test records, but use predicted alert state—not true labels—to
+    # decide which samples receive explanations.
+    test = scored.loc[scored["split"].eq(SPLIT_TEST)].copy()
+    alerts, note = select_xai_candidates(test)
     max_alerts = int(run.cfg.get("xai", {}).get("max_alerts", 60))
     alerts = alerts.sort_values("anomaly_score", ascending=False).head(max_alerts)
     graphs = run.graphs()
-    out: Dict[str, Any] = {"note": note, "n_alert_candidates": int(len(alerts))}
+    out: Dict[str, Any] = {
+        "note": note,
+        "n_alert_candidates": int(len(alerts)),
+        "graph_sequences_loaded": int(len(graphs)),
+        "ground_truth_used_for_candidate_selection": False,
+    }
     explanations: List[Dict[str, Any]] = []
+    missing_graphs = 0
     if len(alerts):
         for _, r in alerts.iterrows():
             sid = str(r["sample_id"])
-            seq = graphs.get(sid)
+            seq = graphs.get(f"{r['dataset_id']}::{sid}", graphs.get(sid))
             if seq is None:
+                missing_graphs += 1
                 continue
             expl = build_explanation(scorer.adapter, seq, float(r["anomaly_score"]), float(r["threshold"]),
                                      float(r["confidence"]), alert_id=f"{r['dataset_id']}:{sid}",
@@ -436,9 +472,11 @@ def stage_xai(run: Runner) -> None:
                                      extra={"nearest_normal_similarity": float(r["nearest_normal_similarity"]),
                                             "memory_source_dataset": scorer.provenance.get("memory_source")})
             explanations.append(expl)
-        with open(run.path("results", "explanations.json"), "w") as fh:
-            json.dump(explanations, fh, indent=2, default=str)
-        out["explanations_written"] = len(explanations)
+    with open(run.path("results", "explanations.json"), "w") as fh:
+        json.dump(explanations, fh, indent=2, default=str)
+    out["explanations_written"] = len(explanations)
+    out["candidate_alerts_without_matching_graph"] = int(missing_graphs)
+    out["graph_match_key"] = "dataset_id::sample_id (fallback to sample_id only for legacy exports)"
     out["attribution_stats"] = ev.explanation_stats(explanations)
     try:
         fid_df, fid_summary = fidelity_plus(scorer, alerts, graphs, run.cfg,
@@ -476,23 +514,76 @@ def stage_xai(run: Runner) -> None:
 
 
 def _join_explanations_into_predictions(run: Runner, explanations: List[Dict[str, Any]]) -> None:
-    """One auditable table: per-alert attribution is joined onto results/predictions.csv (§30)."""
+    """Join per-alert explanations using dataset-qualified, type-normalized IDs.
+
+    Prediction CSVs commonly infer numeric sample IDs as integers, while explanation
+    alert IDs are strings like ``dataset_id:sample_id``.  Joining on sample_id alone
+    both fails on those mixed types and can attach an explanation to a different
+    dataset that happens to reuse the same sample ID.
+    """
     if not explanations:
         return
-    rows = [{"sample_id": str(e["alert_id"]).split(":")[-1],
-             "top_host": (e["top_nodes"] or [{}])[0].get("host"),
-             "top_host_attention": (e["top_nodes"] or [{}])[0].get("attention"),
-             "top_flow_record": (e["top_edges"] or [{}])[0].get("flow_record"),
-             "top_feature": (e["top_features"] or [{}])[0].get("feature"),
-             "explanation_coverage_topk_nodes": e["explanation_coverage_topk_nodes"],
-             "explanation_summary": e["summary"]} for e in explanations]
-    add = pd.DataFrame(rows).drop_duplicates("sample_id", keep="first")
+
+    def id_key(value: Any) -> str:
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return ""
+        text = str(value).strip()
+        # Make integer-valued IDs read as CSV floats (e.g. 229.0) match native IDs.
+        if text.endswith(".0") and text[:-2].lstrip("+-").isdigit():
+            text = text[:-2]
+        return text
+
+    rows = []
+    for e in explanations:
+        alert_id = str(e.get("alert_id", ""))
+        dataset_id, sep, sample_id = alert_id.rpartition(":")
+        if not sep:  # legacy explanation with sample_id only
+            sample_id, dataset_id = alert_id, ""
+        rows.append({
+            "_xai_dataset_key": str(dataset_id).strip(),
+            "_xai_sample_key": id_key(sample_id),
+            "top_host": (e.get("top_nodes") or [{}])[0].get("host"),
+            "top_host_attention": (e.get("top_nodes") or [{}])[0].get("attention"),
+            "top_flow_record": (e.get("top_edges") or [{}])[0].get("flow_record"),
+            "top_feature": (e.get("top_features") or [{}])[0].get("feature"),
+            "explanation_coverage_topk_nodes": e.get("explanation_coverage_topk_nodes"),
+            "explanation_summary": e.get("summary"),
+        })
+    add = pd.DataFrame(rows).drop_duplicates(["_xai_dataset_key", "_xai_sample_key"], keep="first")
     path = run.path("results", "predictions.csv")
-    if os.path.exists(path):
-        pred = pd.read_csv(path)
-        pred = pred.merge(add, on="sample_id", how="left")
-        pred.to_csv(path, index=False)
-        print(f"[out] {path}  (+{len(add.columns) - 1} explanation columns)")
+    if not os.path.exists(path):
+        return
+
+    pred = pd.read_csv(path)
+    if "dataset_id" not in pred.columns or "sample_id" not in pred.columns:
+        raise ValueError("predictions.csv must contain dataset_id and sample_id to join XAI safely")
+    pred["_xai_dataset_key"] = pred["dataset_id"].astype(str).str.strip()
+    pred["_xai_sample_key"] = pred["sample_id"].map(id_key)
+
+    # Dataset-qualified IDs are the normal contract.  Legacy explanations without a
+    # dataset prefix may fall back to sample ID only if that ID is unique in predictions.
+    qualified = add[add["_xai_dataset_key"].ne("")]
+    legacy = add[add["_xai_dataset_key"].eq("")]
+    if not qualified.empty:
+        pred = pred.merge(qualified, on=["_xai_dataset_key", "_xai_sample_key"], how="left", validate="many_to_one")
+    else:
+        for col in ["top_host", "top_host_attention", "top_flow_record", "top_feature",
+                    "explanation_coverage_topk_nodes", "explanation_summary"]:
+            pred[col] = np.nan
+    if not legacy.empty:
+        id_counts = pred["_xai_sample_key"].value_counts()
+        legacy = legacy[legacy["_xai_sample_key"].map(id_counts).fillna(0).eq(1)].drop(columns=["_xai_dataset_key"])
+        if not legacy.empty:
+            legacy = legacy.rename(columns={"_xai_sample_key": "_xai_sample_key"}).drop_duplicates("_xai_sample_key")
+            legacy = legacy.set_index("_xai_sample_key")
+            for col in ["top_host", "top_host_attention", "top_flow_record", "top_feature",
+                        "explanation_coverage_topk_nodes", "explanation_summary"]:
+                if col in legacy.columns:
+                    mapped = pred["_xai_sample_key"].map(legacy[col])
+                    pred[col] = pred[col].where(pred[col].notna(), mapped)
+    pred.drop(columns=["_xai_dataset_key", "_xai_sample_key"], inplace=True, errors="ignore")
+    pred.to_csv(path, index=False)
+    print(f"[out] {path}  (+{len(add.columns) - 2} explanation columns; dataset-qualified sample IDs)")
 
 
 def stage_ablation(run: Runner) -> None:

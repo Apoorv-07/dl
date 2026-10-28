@@ -29,7 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from member3 import evaluate as ev  # noqa: E402
 from member3.contract import (  # noqa: E402
     LABEL_ATTACK, LABEL_BENIGN, RECORD_COLUMNS, SPLIT_CALIBRATION, SPLIT_MEMORY, SPLIT_ONLINE_BENIGN,
-    SPLIT_TEST, ContractError, assign_streams, assert_splits_clean, l2_normalize, load_graphs, mask_graph_sequence,
+    SPLIT_TEST, ContractError, assign_streams, assign_stream_metadata, attack_family_tokens,
+    assert_splits_clean, l2_normalize, load_graphs, mask_graph_sequence,
     save_graphs, save_records, load_records, validate_adapter, validate_records,
 )
 from member3.explain import build_explanation, bootstrap_ci, fidelity_plus  # noqa: E402
@@ -944,7 +945,7 @@ def test_api_serves_score_explain_and_refuses_bad_dim(built):
     r = client.post("/score", json={"sample_id": str(sid)}).json()
     assert r["anomaly_score"] > r["threshold"] and 0.0 <= r["confidence"] <= 1.0
     assert r["alert"]["alert_state"] in ("candidate", "confirmed") and len(r["neighbours"]) == 4
-    assert r["scoring_definition"] == "1 - max_j cos(z, m_j)" and r["model_weights_updated"] is False
+    assert r["scoring_definition"].startswith("1 - max_j cos(h, m_j)") and r["model_weights_updated"] is False
     assert r["memory_update"] == "disabled" and r["dataset_label"] == "DS-TEST"
     assert all(0.0 <= n["similarity"] <= 1.0 for n in r["neighbours"])
 
@@ -997,3 +998,123 @@ def test_api_memory_update_is_off_by_default(built):
     body = client.post("/score", json={"sample_id": str(sid), "allow_memory_update": True}).json()
     assert body["memory_update"] == "disabled" and body["model_weights_updated"] is False
     assert built["scorer"].memory.stats.n == n0 and built["scorer"].memory.stats.version == v0
+
+
+def test_member2_package_aliases_are_normalised(tmp_path):
+    from member3.contract import (load_records, validate_records, SPLIT_MEMORY, SPLIT_CALIBRATION,
+                                  attack_family_tokens, assign_stream_metadata)
+    path = tmp_path / "member2_records.npz"
+    np.savez_compressed(
+        path,
+        embedding=np.asarray([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]], dtype=np.float32),
+        dataset_id=np.asarray(["dataset1_graph_pt", "dataset2_graph_validation_v2", "dataset2_graph_validation_v2"]),
+        split=np.asarray(["memory_train", "calibration", "test"]),
+        sample_id=np.asarray(["m1", "c1", "t1"]),
+        window_id=np.asarray(["", "w1", "w2"]),
+        timestamp=np.asarray(["", "10", "20"]),
+        label=np.asarray(["0", "0", "1"]),
+        attack_family=np.asarray(["BENIGN", "BENIGN", "Recon|Exploits"]),
+    )
+    df = load_records(str(path))
+    assert df["split"].tolist() == [SPLIT_MEMORY, SPLIT_CALIBRATION, SPLIT_TEST]
+    assert df["label"].tolist() == ["benign", "benign", "attack"]
+    assert np.isnan(df["timestamp"].iloc[0])
+    assert df["attack_family"].iloc[2] == "Recon|Exploits"
+    validate_records(df, expected_dim=2)
+    assert set(attack_family_tokens("Recon|Exploits")) == {"Recon", "Exploits"}
+
+
+def test_real_stream_metadata_does_not_invent_timestamps_or_attack_bursts():
+    df = pd.DataFrame({
+        "dataset_id": ["d", "d", "d", "d"],
+        "split": ["test"] * 4,
+        "sample_id": ["s0", "s1", "s2", "s3"],
+        "source_index": [0, 1, 2, 3],
+        "timestamp": [100.0, 130.0, 160.0, 190.0],
+        "label": ["benign", "attack", "benign", "attack"],
+        "attack_family": ["benign", "Recon", "benign", "Exploits|Recon"],
+    })
+    out = assign_stream_metadata(df)
+    assert out["sample_id"].tolist() == ["s0", "s1", "s2", "s3"]
+    assert out["stream_pos"].tolist() == [0, 1, 2, 3]
+    assert out["timestamp"].tolist() == [100.0, 130.0, 160.0, 190.0]
+    assert out["episode_id"].iloc[1] != out["episode_id"].iloc[3]
+
+
+def test_real_stream_metadata_keeps_missing_timestamps_missing():
+    df = pd.DataFrame({
+        "dataset_id": ["d", "d"], "split": ["train_benign", "train_benign"],
+        "sample_id": ["s0", "s1"], "source_index": [5, 7],
+        "timestamp": [np.nan, np.nan], "label": ["benign", "benign"],
+        "attack_family": ["benign", "benign"],
+    })
+    out = assign_stream_metadata(df)
+    assert out["stream_pos"].tolist() == [0, 1]
+    assert out["timestamp"].isna().all()
+
+
+def test_split_guard_uses_dataset_qualified_native_sample_ids():
+    from member3.contract import assert_splits_clean
+    df = pd.DataFrame({
+        "dataset_id": ["dataset1", "dataset2", "dataset2"],
+        "sample_id_source": ["native:sequence_id", "native:sequence_id", "native:sequence_id"],
+        "split": ["train_benign", "calibration_benign", "test"],
+        "sample_id": ["17", "18", "17"],
+        "label": ["benign", "benign", "attack"],
+        "attack_family": ["benign", "benign", "Recon"],
+    })
+    # Reused native sequence numbers across separate files are not the same record.
+    assert_splits_clean(df)
+
+
+def test_xai_candidates_do_not_filter_by_ground_truth_label():
+    from run_experiment import select_xai_candidates
+
+    scored = pd.DataFrame({
+        "sample_id": ["false_positive", "true_positive", "not_flagged"],
+        "label": ["benign", "attack", "attack"],
+        "confirmed_alert": [True, True, False],
+        "is_anomaly": [True, True, False],
+        "anomaly_score": [0.8, 0.7, 0.1],
+    })
+    candidates, note = select_xai_candidates(scored)
+    assert set(candidates["sample_id"]) == {"false_positive", "true_positive"}
+    assert "ground-truth labels were not used" in note
+
+    no_confirmed = scored.copy()
+    no_confirmed["confirmed_alert"] = False
+    candidates, note = select_xai_candidates(no_confirmed)
+    assert set(candidates["sample_id"]) == {"false_positive", "true_positive"}
+    assert "all single-window predicted anomalies" in note
+
+
+def test_xai_join_normalizes_sample_id_and_uses_dataset_key(tmp_path):
+    """Graph explanations must survive int/string IDs without crossing datasets."""
+    from run_experiment import _join_explanations_into_predictions
+
+    class StubRun:
+        def path(self, *parts):
+            target = tmp_path.joinpath(*parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            return str(target)
+
+    pred_path = tmp_path / "results" / "predictions.csv"
+    pred_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([
+        {"dataset_id": "dataset2_graph_validation_v2", "sample_id": 229, "label": "benign"},
+        {"dataset_id": "other_dataset", "sample_id": 229, "label": "attack"},
+    ]).to_csv(pred_path, index=False)
+    explanation = {
+        "alert_id": "dataset2_graph_validation_v2:229",
+        "top_nodes": [{"host": "host-a", "attention": 0.7}],
+        "top_edges": [{"flow_record": None}],
+        "top_features": [{"feature": "PROTOCOL_17"}],
+        "explanation_coverage_topk_nodes": 0.7,
+        "summary": "test explanation",
+    }
+
+    _join_explanations_into_predictions(StubRun(), [explanation])
+    joined = pd.read_csv(pred_path)
+    assert joined.loc[0, "top_host"] == "host-a"
+    assert joined.loc[0, "top_feature"] == "PROTOCOL_17"
+    assert pd.isna(joined.loc[1, "top_host"])

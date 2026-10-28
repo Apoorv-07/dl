@@ -1,0 +1,16 @@
+{
+  "method": "confidence_aware",
+  "value": 0.25115908107161516,
+  "scale": 0.028250956177711485,
+  "median": 0.09802931547164917,
+  "mad_sigma": 0.028250956177711485,
+  "percentile": 99.5,
+  "safety_margin": 0.25,
+  "k_mad": 3.5,
+  "confidence_sharpness": 1.0,
+  "n_calibration": 724,
+  "calibrated_on": "calibration_benign@['dataset2_graph_validation_v2']",
+  "seed": 42,
+  "updated_online": 0,
+  "online_history": []
+}

@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from .contract import (LABEL_ATTACK, LABEL_BENIGN, SPLIT_CALIBRATION, SPLIT_MEMORY, SPLIT_ONLINE_BENIGN,
-                         SPLIT_TEST)
+                         SPLIT_TEST, attack_family_tokens, has_attack_family)
 from .explain import bootstrap_ci
 from .inference import calibrate_threshold, confidence_from_score
 
@@ -209,14 +209,15 @@ def per_attack_family(pred: pd.DataFrame, cfg: Dict[str, Any], families: Optiona
     """
     tst = pred[pred["split"] == SPLIT_TEST]
     ben = tst[tst["label"] == LABEL_BENIGN]
-    fams = list(families or sorted(f for f in tst.loc[tst["label"] == LABEL_ATTACK, "attack_family"].unique()))
+    fams = list(families or sorted({fam for value in tst.loc[tst["label"] == LABEL_ATTACK, "attack_family"]
+                                   for fam in attack_family_tokens(value)}))
     ws = float(cfg.get("data", {}).get("window_seconds", 30))
     rows = []
     for fam in fams:
-        pos = tst[tst["attack_family"] == fam]
-        # labels are read back from the aligned frame, never positionally concatenated
+        pos = tst[tst["attack_family"].map(lambda v: has_attack_family(v, fam))]
+        # A window can contain multiple families; it is positive for each listed family.
         sub = pd.concat([pos, ben]).sort_index()
-        y = (sub["attack_family"] == fam).astype(int).to_numpy()
+        y = sub["attack_family"].map(lambda v: has_attack_family(v, fam)).astype(int).to_numpy()
         p = sub["is_anomaly"].astype(int).to_numpy()
         m = classification_metrics(y, p, sub["anomaly_score"].to_numpy(dtype=float))
         m.update(score_summary(sub, (sub["attack_family"] == fam).to_numpy()))
@@ -230,7 +231,7 @@ def per_attack_family(pred: pd.DataFrame, cfg: Dict[str, Any], families: Optiona
         m["mean_detection_delay_steps"] = float(np.mean(dd)) if dd.size else float("nan")
         m["median_detection_delay_steps"] = float(np.median(dd)) if dd.size else float("nan")
         m["mean_detection_delay_seconds"] = float(np.mean(dd) * ws) if dd.size else float("nan")
-        det = sub.loc[sub["attack_family"] == fam]
+        det = sub.loc[sub["attack_family"].map(lambda v: has_attack_family(v, fam))]
         col = "alert_raised" if "alert_raised" in det.columns else "confirmed_alert"
         m["family_alert_rate"] = float(det[col].mean()) if len(det) else float("nan")
         m["threshold"] = float(sub["threshold"].iloc[0]) if len(sub) else float("nan")
@@ -257,9 +258,9 @@ def leave_one_family_out(records: pd.DataFrame, cfg: Dict[str, Any], families: S
     base_tau = float(cfg.get("_baseline_threshold", "nan"))
     rows, audit_folds = [], []
     for fam in families:
-        removed = int((records["attack_family"] == fam).sum())
-        in_permitted = int(((records["attack_family"] == fam)
-                            & records["split"].isin([SPLIT_MEMORY, SPLIT_CALIBRATION])).sum())
+        member = records["attack_family"].map(lambda v: has_attack_family(v, fam))
+        removed = int(member.sum())
+        in_permitted = int((member & records["split"].isin([SPLIT_MEMORY, SPLIT_CALIBRATION])).sum())
         row: Dict[str, Any] = {"held_out_family": fam, "rows_removed_from_permitted_stages": in_permitted,
                                "rows_total_for_family": removed}
         try:
@@ -572,7 +573,7 @@ def figure_architecture(out_dir: str, status: Dict[str, str]) -> None:
     """Figure 1 - Member-3 inference path (drawn from this repo's real modules)."""
     plt = _plt()
     steps = [
-        ("Member 2: GATv2 + Temporal Transformer\n(frozen checkpoint, embedding z)", "#e8eef7"),
+        ("Member 2: GATv2 + Temporal Transformer\n(frozen checkpoint, embedding h; 128-D)", "#e8eef7"),
         ("L2-normalise z\n(unit sphere)", "#eef2f7"),
         ("Adaptive Memory Bank\nrepresentative normal embeddings", "#e6f4ea"),
         ("FAISS HNSW k-NN\n(inner product = cosine)", "#e6f4ea"),

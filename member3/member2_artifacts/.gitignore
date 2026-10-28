@@ -1,0 +1,6 @@
+# Large model/data binaries are supplied out of band; do not commit them.
+checkpoint.pt
+*.pt
+*.pth
+*.npz
+*.csv

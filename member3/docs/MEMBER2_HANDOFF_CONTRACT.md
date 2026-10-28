@@ -199,7 +199,7 @@ Contract:
 | dtype | `float32` preferred; `float64` accepted; no `bfloat16`/`fp16` at the interface |
 | device | returned on the device reported by `metadata()["device"]`; Member 3 moves it to CPU |
 | normalisation | if `l2_normalized: false`, Member 3 applies `z / ||z||` and records `embedding_normalized_by: member3` |
-| pre/post projection head | must be declared; the memory bank uses the **post-projection** embedding |
+| pre/post projection head | must be declared; the memory bank uses the agreed downstream representation `h` (128-D for this checkpoint) |
 | determinism | same input + same model => bitwise identical output (no dropout at inference, `model.eval()`) |
 | statelessness | `encode()` must not mutate the model, the input object, or any global RNG stream used elsewhere |
 | batching | optional `encode_batch(list)`; Member 3 falls back to a loop if absent |
@@ -531,3 +531,18 @@ missing, `embedding_dim`/feature/graph schemas mismatch, calibration data is abs
 evaluation labels are missing, the FAISS index dimension disagrees, attention extraction is
 unavailable, or a split is contaminated. Aborted experiments are recorded in
 `results/manifest.json` with their reason; they are never replaced by estimated numbers.
+
+
+## Package compatibility note (2026-10-28)
+
+The Member-2 export in `member2_records.npz` contains `split=memory_train` and `split=calibration`
+with numeric labels `0`/`1`. Member 3's loader now normalises these aliases to `train_benign`,
+`calibration_benign`, `benign`, and `attack`. `attack_family` can contain pipe-separated family
+names; family-level metrics treat each listed family independently. Blank source timestamps are
+preserved as missing; Member 3 may derive stream positions from the real timestamp/source order but
+must not create synthetic attack bursts for real evaluation data.
+
+The downstream representation is **h (128-D)**, not `z` (64-D projection used by the contrastive
+training loss). The current export's test source is identified as `NF-CSE-CIC-IDS2018-v3`, while the
+memory source is represented by the generic ID `dataset1_graph_pt`; confirm Dataset 1's identity
+before making a cross-dataset generalisation claim.

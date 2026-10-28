@@ -14,6 +14,7 @@ but `/health` reports exactly what is missing.
 from __future__ import annotations
 
 import json
+import math
 import os
 from typing import Any, Dict, Optional
 
@@ -21,6 +22,7 @@ import numpy as np
 
 from .contract import (
     ContractError,
+    assign_stream_metadata,
     assign_streams,
     load_adapter,
     load_config,
@@ -138,8 +140,17 @@ class ServiceState:
         # reports the real reason if the artefacts are missing
         self.adapter: Optional[Any] = None
         self.adapter_meta: Dict[str, Any] = {}
-        self.results_dir = str(self.cfg.get("output", {}).get("results_dir", "results"))
-        self.state_dir = str(self.cfg.get("output", {}).get("state_dir", "artifacts"))
+        # Resolve relative artifact paths against the config file, not process CWD.
+        # This keeps temporary/test configs isolated from the repository's results.
+        config_dir = os.path.dirname(os.path.abspath(config_path))
+        def resolve_output_path(value: Any, default: str) -> str:
+            path = os.path.expanduser(str(value or default))
+            if not os.path.isabs(path):
+                path = os.path.join(config_dir, path)
+            return os.path.abspath(path)
+        output_cfg = dict(self.cfg.get("output", {}))
+        self.results_dir = resolve_output_path(output_cfg.get("results_dir"), "results")
+        self.state_dir = resolve_output_path(output_cfg.get("state_dir"), "artifacts")
         self.records = None
         self.records_path: Optional[str] = None
         self.graphs: Dict[str, Dict[str, Any]] = {}
@@ -158,18 +169,21 @@ class ServiceState:
         # no implicit fallback: the API serves exactly the files the config (or the env override)
         # points at. Env overrides exist so a demo/self-check run can be served without editing config.
         rp = os.environ.get("MEMBER3_RECORDS") or d.get("records_path")
-        gp = os.environ.get("MEMBER3_GRAPHS") or d.get("graph_path")
+        gp = os.environ.get("MEMBER3_GRAPHS") or d.get("graph_paths") or d.get("graph_path")
         self.records_path = str(rp) if rp else None
         if rp and os.path.exists(str(rp)):
             rec = load_records(str(rp))
             validate_records(rec, expected_dim=int(self.adapter_meta["embedding_dim"]))
-            if "stream_id" not in rec.columns:
-                rec = assign_streams(rec, window_seconds=float(d.get("window_seconds", 30)),
-                                     seed=int(self.cfg.get("seed", 0)))
+            required_stream_cols = ("stream_id", "stream_pos", "episode_id")
+            if not all(col in rec.columns and rec[col].notna().all()
+                       and not (rec[col].astype(str).str.strip() == "").any() for col in required_stream_cols):
+                rec = assign_stream_metadata(rec, window_seconds=float(d.get("window_seconds", 30)))
             self.records = rec
-        if gp and os.path.exists(str(gp)):
+        graph_paths = [gp] if isinstance(gp, str) else list(gp or [])
+        existing_graphs = [str(path) for path in graph_paths if path and os.path.exists(str(path))]
+        if existing_graphs:
             from .contract import load_graphs
-            self.graphs = load_graphs(str(gp))
+            self.graphs = load_graphs(existing_graphs)
         if self.records is not None and (self.records["split"] == "test").any():
             self.scorer = Member3Scorer.build(self.cfg, self.adapter, self.adapter_meta, self.records)
         elif os.path.exists(idx):
@@ -219,12 +233,20 @@ class ServiceState:
         if len(hit) == 0:
             raise ValueError(f"unknown sample_id '{sid}'")
         row = hit.iloc[0]
+        raw_timestamp = row["timestamp"]
+        try:
+            timestamp = float(raw_timestamp)
+            if not np.isfinite(timestamp):
+                timestamp = None
+        except (TypeError, ValueError):
+            timestamp = None
         meta = {"source": "record_file", "sample_id": str(row["sample_id"]), "dataset_id": str(row["dataset_id"]),
-                "split": str(row["split"]), "timestamp": float(row["timestamp"]),
+                "split": str(row["split"]), "timestamp": timestamp,
                 "stream_pos": int(row["stream_pos"]), "label": str(row["label"]),
                 "attack_family": str(row["attack_family"])}
-        # the stored graph sequence travels with the record so /explain works without a re-upload
-        return np.asarray(row["embedding"], dtype=np.float64).reshape(1, -1), self.graphs.get(str(sid)), meta
+        # Prefer the dataset-qualified native graph; fall back to portable graph exports keyed by sample ID.
+        graph = self.graphs.get(f"{row['dataset_id']}::{sid}", self.graphs.get(str(sid)))
+        return np.asarray(row["embedding"], dtype=np.float64).reshape(1, -1), graph, meta
 
 
     def score(self, payload: Dict[str, Any], explain: bool = False) -> Dict[str, Any]:
@@ -250,7 +272,7 @@ class ServiceState:
                                  or ",".join([str(x) for x in (self.cfg.get("evaluation", {})
                                                                 .get("test_datasets") or [])])
                                  or "undeclared"),
-            "scoring_definition": "1 - max_j cos(z, m_j)",
+            "scoring_definition": "1 - max_j cos(h, m_j) (h is the 128-D Member-2 representation)",
             "model_weights_updated": False,
         }
         # optional, strictly gated online memory adaptation
@@ -300,6 +322,19 @@ class ServiceState:
                 }
 
 
+def _json_safe(value: Any) -> Any:
+    """Convert non-finite numeric values to JSON null before strict response encoding."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, np.generic):
+        return _json_safe(value.item())
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
 def create_app(config_path: Optional[str] = None):
     from fastapi import Body, FastAPI, HTTPException
     from fastapi.responses import HTMLResponse, JSONResponse
@@ -347,8 +382,8 @@ def create_app(config_path: Optional[str] = None):
         p = os.path.join(state.results_dir, "metrics.json")
         if not os.path.exists(p):
             raise HTTPException(status_code=404, detail=f"no results yet: {p} missing (run run_experiment.py)")
-        with open(p) as fh:
-            return JSONResponse(json.load(fh))
+        with open(p, encoding="utf-8") as fh:
+            return JSONResponse(_json_safe(json.load(fh)))
 
     return app
 

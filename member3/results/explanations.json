@@ -1,0 +1,109 @@
+[
+  {
+    "alert_id": "dataset2_graph_validation_v2:229",
+    "anomaly_score": 0.26064,
+    "threshold": 0.251159,
+    "confidence": 0.5831,
+    "exceeds_threshold": true,
+    "top_nodes": [
+      {
+        "node_index": 1,
+        "host": "0.0.0.0",
+        "attention": 0.142857,
+        "attention_share": 0.142857
+      },
+      {
+        "node_index": 2,
+        "host": "172.31.66.8",
+        "attention": 0.142857,
+        "attention_share": 0.142857
+      },
+      {
+        "node_index": 3,
+        "host": "5.188.11.25",
+        "attention": 0.142857,
+        "attention_share": 0.142857
+      },
+      {
+        "node_index": 4,
+        "host": "172.31.65.127",
+        "attention": 0.142857,
+        "attention_share": 0.142857
+      },
+      {
+        "node_index": 5,
+        "host": "54.69.172.44",
+        "attention": 0.142857,
+        "attention_share": 0.142857
+      }
+    ],
+    "top_edges": [
+      {
+        "edge_index": 7,
+        "flow_record": null,
+        "attention": 1.0
+      },
+      {
+        "edge_index": 8,
+        "flow_record": null,
+        "attention": 1.0
+      },
+      {
+        "edge_index": 6,
+        "flow_record": null,
+        "attention": 0.549825
+      },
+      {
+        "edge_index": 0,
+        "flow_record": null,
+        "attention": 0.462119
+      },
+      {
+        "edge_index": 5,
+        "flow_record": null,
+        "attention": 0.450175
+      }
+    ],
+    "top_features": [
+      {
+        "feature": "SRC_PORT_dynamic",
+        "attribution_weight": 0.898011
+      },
+      {
+        "feature": "DST_PORT_registered",
+        "attribution_weight": 0.829915
+      },
+      {
+        "feature": "PROTOCOL_17",
+        "attribution_weight": 0.711205
+      },
+      {
+        "feature": "PROTOCOL_6",
+        "attribution_weight": 0.288795
+      },
+      {
+        "feature": "L7_PROTO",
+        "attribution_weight": 0.25196
+      },
+      {
+        "feature": "DST_PORT_well_known",
+        "attribution_weight": 0.170085
+      },
+      {
+        "feature": "SHORTEST_FLOW_PKT",
+        "attribution_weight": 0.107425
+      },
+      {
+        "feature": "SRC_PORT_well_known",
+        "attribution_weight": 0.101989
+      }
+    ],
+    "feature_attribution_source": "derived:attention_weighted_edge_feature_magnitude",
+    "temporal_snapshot": 0,
+    "n_snapshots": 5,
+    "explanation_coverage_topk_nodes": 0.7143,
+    "nearest_normal_similarity": 0.7393598556518555,
+    "memory_source_dataset": "['dataset1_graph_pt']",
+    "summary": "anomaly score 0.261 > threshold 0.251; most influential hosts: 0.0.0.0, 172.31.66.8, 5.188.11.25"
+  }
+]

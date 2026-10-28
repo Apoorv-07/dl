@@ -3,12 +3,13 @@
 # copied into results/manifest.json at run time.
 
 experiment:
-  name: member3_full_run
-  id: cfg-m3-v1
+  name: member3_member2_package_validation
+  id: cfg-m3-member2-export-v2-graph-xai
   description: >
-    Adaptive Memory Bank + incremental FAISS retrieval + confidence-aware threshold +
-    multi-stage alert verification + explainable graph attribution, evaluated
-    cross-dataset and leave-one-attack-family-out.
+    Member 3 integration against Member 2's exported cached embeddings, with the matching
+    validation graph configured for test-time graph explanations and Fidelity+. The validation
+    graph ID audit has zero unmatched IDs, but semantic mapping, timestamp alignment and source-flow
+    overlap still require upstream confirmation. Cross-dataset generalisation is not claimed.
 
 seed: 42                     # single global seed: memory selection, bootstrap CIs, masking draws
 
@@ -24,12 +25,12 @@ member2:
 
 # ---------------------------------------------------------------- data
 data:
-  records_path: null                    # npz/csv of Member-2 embeddings + eval metadata
-  graph_path: null                      # temporal graph sequences (needed for masking Fidelity+)
+  records_path: member2_artifacts/member2_records.npz  # exported embeddings + metadata
+  graph_path: ../member2/graph_validation_v2.pt  # validation graph only for test-time XAI/Fidelity+
+  graph_paths: []                       # intentionally empty: do not load the multi-GB train graph here
   require_labels: true                  # labels are read for evaluation only, never for fitting
   window_seconds: 30                    # snapshot duration W_m from the design doc
-  dataset_label: null                   # optional label written into every table row;
-                                        # defaults to evaluation.test_datasets
+  dataset_label: "NF-CSE-CIC-IDS2018-v3 packaged validation (in-domain; not cross-dataset)"
 
 # ---------------------------------------------------------------- adaptive memory bank
 memory:
@@ -71,9 +72,9 @@ adaptation:
 
 # ---------------------------------------------------------------- evaluation protocol
 evaluation:
-  cross_dataset: true
-  train_dataset: NF-CSE-CIC-IDS2018-v3      # benign only
-  test_datasets: [NF-UNSW-NB15-v3]          # benign + unseen attacks
+  cross_dataset: false                     # current package does not identify an independent cross-domain test dataset
+  train_dataset: null                      # package uses generic dataset1_graph_pt ID; don't invent its dataset name
+  test_datasets: [NF-CSE-CIC-IDS2018-v3]    # identity from Member-2 metadata; test split is held-out within this export
   optional_datasets: [NF-ToN-IoT-v3]        # additional generalisation benchmark
 zero_day:
   protocol: leave_one_attack_family_out
@@ -109,6 +110,16 @@ benchmark:
   batch_size: 1
   latency_target_ms: 5.0      # DESIGN TARGET from the doc; only a target, never a result
   hardware_note: sandbox x86-64, CPU only
+
+# These limitations are copied into results/manifest.json so they stay with produced metrics.
+methodology_warnings:
+  - "Cached-embedding readout diagnostics report best tested ROC-AUC 0.463; detection quality is not established. Do not invert the score sign or choose the score using final test labels."
+  - "The current export does not establish cross-dataset generalisation; the test source is the supplied NF-CSE-CIC-IDS2018-v3 validation export."
+  - "The validation graph audit found 2,463 graph sequences and 2,463 corresponding records, with zero ID mismatches under sequence_id/sample_id comparison; Member 1 must still confirm that this ID equality is the intended semantic mapping."
+  - "The training graph has 2,463 sequences but 2,467 records assigned to its dataset; sample IDs 2463-2466 have no matching graph sequence. Training graph is intentionally excluded from test-time XAI loading."
+  - "Neither graph export contains explicit per-snapshot time metadata in the audit; timestamp restoration before 30-second window construction remains unverified."
+  - "Exact duplicate snapshots were reported upstream; verify source-flow provenance and split boundaries before claiming leakage or leak-free evaluation."
+  - "Graph-based XAI/Fidelity+ is attempted only for predicted test anomalies that match validation graph sequences. Its successful execution does not validate detector quality or resolve temporal leakage questions."
 
 output:
   results_dir: results

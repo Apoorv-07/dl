@@ -2,9 +2,9 @@
 
 Single scoring definition used by every table, figure and API response (§9):
 
-    z          = L2-normalise(embedding)                    # unit sphere
-    s(z)       = max_{m in NN_k(z)}  cos(z, m)              # cosine similarity
-    anomaly    = 1 - s(z)          in [0, 2]   (0 = matches a stored normal)
+    e          = L2-normalise(h)                            # h is Member-2's 128-D representation
+    s(e)       = max_{m in NN_k(e)}  cos(e, m)              # cosine similarity
+    anomaly    = 1 - s(e)          in [0, 2]   (0 = matches a stored normal)
 
 Distance-like language ("anomaly distance", "cosine distance" in the project doc)
 always refers to this single quantity; no Euclidean path exists in this module.
@@ -165,7 +165,14 @@ class Member3Scorer:
         if len(mem_rows) == 0:
             raise ContractError(f"no '{SPLIT_MEMORY}' rows: cannot build normal memory bank")
         X_mem = np.vstack(list(mem_rows["embedding"]))
-        meta = [{"sample_id": a, "dataset_id": b, "window_id": c, "timestamp": float(d),
+        def optional_timestamp(value: Any) -> Optional[float]:
+            try:
+                number = float(value)
+                return number if np.isfinite(number) else None
+            except (TypeError, ValueError):
+                return None
+
+        meta = [{"sample_id": a, "dataset_id": b, "window_id": c, "timestamp": optional_timestamp(d),
                  "source_split": SPLIT_MEMORY}
                 for a, b, c, d in zip(mem_rows["sample_id"], mem_rows["dataset_id"], mem_rows["window_id"],
                                       mem_rows["timestamp"])]
@@ -338,7 +345,8 @@ class Member3Scorer:
                 rec = self.memory.update_if_benign(
                     X[i], confidence=float(cf), score=float(sc), threshold=float(self.threshold.value),
                     metadata={"sample_id": sid, "label": lab, "dataset_id": str(df.iloc[i]["dataset_id"]),
-                              "timestamp": float(df.iloc[i]["timestamp"])},
+                              "timestamp": (float(df.iloc[i]["timestamp"])
+                                            if pd.notna(df.iloc[i]["timestamp"]) else None)},
                     allow_online=True, benign_confidence_max=float(ac.get("benign_confidence_max", 0.05)))
                 actions.append(str(rec["action"]))
         finally:
