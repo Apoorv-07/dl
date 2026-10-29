@@ -1,0 +1,29 @@
+{
+  "args": {
+    "name": "e2_pool",
+    "out_root": "checkpoints_exp",
+    "transform": "none",
+    "pooling": "meanmax",
+    "edge_drop": 0.5,
+    "feature_mask": 0.15,
+    "temperature": 0.1,
+    "lr": 0.0001,
+    "weight_decay": 0.0,
+    "scheduler": "none",
+    "max_epochs": 100,
+    "patience": 10,
+    "batch_size": 32,
+    "seed": 42,
+    "resume": false
+  },
+  "cfg": {
+    "transform": "none",
+    "pooling": "meanmax",
+    "edge_drop": 0.5,
+    "feature_mask": 0.15
+  },
+  "torch": "2.11.0+cu128",
+  "python": "3.13.7",
+  "train_sequences": 2220,
+  "val_sequences": 247
+}

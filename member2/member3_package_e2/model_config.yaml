@@ -1,0 +1,22 @@
+# Member 2 encoder -- generated from the actual checkpoint
+model:
+  name: member2_gatv2_temporal
+  checkpoint: best_model.pt
+  checkpoint_sha256: 07f9940b032bd970cd8d0657e94c4310588c86a52687a8b94d8a8431b61fc0c0
+  best_epoch: 65
+  best_validation_loss: 0.3642857457910265
+  num_parameters: 676928
+  embedding_used_downstream: h
+  h_dim: 128
+  h_l2_normalised: true
+  z_dim: 64
+gatv2:
+  layer1: {in: 53, heads: 4, out_per_head: 128, concat: true, edge_dim: 53, dropout: 0.2, activation: ELU}
+  layer2: {in: 512, heads: 1, out: 128, edge_dim: 53, dropout: 0.2}
+  self_loops: true
+pooling: meanmax_over_nodes
+temporal_transformer: {snapshots: 5, positional_embedding: learned, layers: 2, heads: 4, ffn: 512, activation: gelu, dropout: 0.1, norm: post_ln, readout: mean_tokens_layernorm_l2}
+projection_head: {in: 128, hidden: 128, out: 64, activation: GELU}
+input: {node_features: 53, edge_features: 53, clamp: [-5.0, 5.0], transform: none}
+training: {batch_size: 32, lr: 0.0001, nt_xent_temperature: 0.1, seed: 42, objective: benign_only_contrastive}
+anomaly_scoring: {memory: dataset1_train_h, metric: cosine_distance, k: 5, threshold: benign_calibration_p95}

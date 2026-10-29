@@ -86,7 +86,10 @@ class Member2Adapter:
         import torch_geometric
         ck = self.ckpt
         return dict(
-            model="GATv2 (2 layers) -> global mean pooling per snapshot -> Temporal Transformer -> h -> projection head -> z",
+            model=("GATv2 (2 layers) -> " +
+                   ("global mean pooling per snapshot" if self.cfg["pooling"] == "mean"
+                    else "concat(mean, max over nodes) -> Linear(256,128) per snapshot") +
+                   " -> Temporal Transformer -> h -> projection head -> z"),
             embedding_used_downstream="h", h_dim=128, h_l2_normalised=True, z_dim=64,
             gatv2=dict(layer1="GATv2Conv(53 -> 4 heads x 128, concat=512, edge_dim=53, dropout=0.2) + ELU",
                        layer2="GATv2Conv(512 -> 128, 1 head, edge_dim=53, dropout=0.2)",

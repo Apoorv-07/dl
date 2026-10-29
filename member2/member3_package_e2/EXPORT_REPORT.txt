@@ -1,0 +1,48 @@
+======================================================================
+SOURCE FILES
+======================================================================
+sha256 graph: 393bd9c28efa2a238fd008a260090ff8d08f9f36f9f663273bcb0d06d7a95bed
+sha256 validation: 92dc14dfcd90f695397c0f4bbf4e2f1d32339b962e417755b4b1c32681f11995
+sha256 checkpoint: 07f9940b032bd970cd8d0657e94c4310588c86a52687a8b94d8a8431b61fc0c0
+[graph.pt] top-level keys other than 'sequences': {}
+[graph.pt] per-sequence keys: ['feature_list', 'label', 'node_id_maps', 'num_snapshots', 'sequence_id', 'snapshots', 'window_size_sec']
+[graph.pt] per-snapshot (Data) keys: ['edge_attr', 'edge_index', 'x']
+[graph_validation_v2.pt] top-level keys other than 'sequences': {'feature_list': '<list>', 'num_features': 53, 'window_size_sec': 30, 'num_snapshots': 5, 'sequence_duration_sec': 150, 'dataset': 'NF-CSE-CIC-IDS2018-v3', 'purpose': 'in-domain validation', 'contains_benign': True, 'contains_attacks': True, 'normalization': 'benign StandardScaler (feature_scaler.pkl) -> log1p(clip>=0)/min-max (norm_stats.pkl); nothing refitted', 'label_definition': 'sequence label = 1 if it contains >=1 attack flow; see attack_ratio for how many', 'low_traffic_rule': 'mean nodes per snapshot < 30 (flagged, not dropped)'}
+[graph_validation_v2.pt] per-sequence keys: ['attack_ratio', 'attack_types', 'end_time', 'feature_list', 'label', 'low_traffic', 'mean_nodes', 'node_id_maps', 'num_attack_flows', 'num_flows', 'num_nodes_per_snapshot', 'num_snapshots', 'sequence_id', 'snapshots', 'start_time', 'window_ids', 'window_size_sec']
+[graph_validation_v2.pt] per-snapshot (Data) keys: ['edge_attr', 'edge_index', 'edge_y', 'x', 'y']
+native label values  graph.pt: {'normal': 2467}
+native label values  graph_validation_v2.pt: {'0': 1448, '1': 1015}
+(numeric label: 'normal'/'benign'/0 -> 0, 'attack'/1 -> 1; any other value is left empty, never guessed)
+
+======================================================================
+EMBEDDING (a few minutes)
+======================================================================
+memory_train: 2220 rows from dataset1_graph_pt
+benign_heldout_dataset1: 247 rows from dataset1_graph_pt
+calibration: 724 rows from dataset2_graph_validation_v2
+test: 1739 rows from dataset2_graph_validation_v2
+
+======================================================================
+CROSS-CHECK against the cached NPZ
+======================================================================
+no --npz given; skipped
+
+======================================================================
+RECORDS
+======================================================================
+rows: 4930  embedding shape: (4930, 128)  (h, 128-d, unit norm: min/max norm 1.000000/1.000000)
+  memory_train               n= 2220  labels={np.str_('0'): np.int64(2220)}
+  benign_heldout_dataset1    n=  247  labels={np.str_('0'): np.int64(247)}
+  calibration                n=  724  labels={np.str_('0'): np.int64(724)}
+  test                       n= 1739  labels={np.str_('0'): np.int64(724), np.str_('1'): np.int64(1015)}
+
+MISSING (no native key found in graph_validation_v2.pt; left empty / positional, NOT invented): none
+attack_family is the window-level 'attack_types' list ('|'-joined); a window can contain several families.
+label: 1 = window contains at least one attack flow (Member 1's definition); median attack window is ~2.2% attack flows.
+
+sample_pairs.pt: smallest benign (idx 1979) and smallest attack (idx 1970) windows with their h; re-encode with Member2Adapter and compare to pairs[i]['h'] (max abs diff should be < 1e-4).
+
+feature_list graph.pt == graph_validation_v2.pt: True;  == feature_cols.pkl: True
+
+Wrote: feature_schema.json, member2_records.csv, member2_records.npz, metadata_discovery.json, model_config.yaml, preprocessing.json, sample_pairs.pt
+Folder: D:\DL_ZeroDay_Member2\member3_package_20261030_032409
